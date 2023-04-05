@@ -1,103 +1,114 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.Events;
+using PlayFab;
+using PlayFab.ClientModels;
 
-public class PlayfabInventoryVirtualCurrencyView : MonoBehaviour
+[System.Serializable]
+public class PlayfabInventoryItem
 {
-    void OnEnable()
-    {
-        // Hide
-        this.Hide();
+public string ItemId;
+public string DisplayName;
+public int Count;
+}
 
-        // Inventory is setup?
-        if (PlayfabInventory.Instance != null)
+public class PlayfabInventory : MonoBehaviour
+{
+private static PlayfabInventory instance = null;
+public static PlayfabInventory Instance
+{
+get
+{
+if (instance == null)
+instance = FindObjectOfType<PlayfabInventory>();
+return instance;
+}
+}
+[Header("Inventory")]
+public List<PlayfabInventoryItem> Inventory;
+public Dictionary<string, int> VirtualCurrency;
+
+[Header("Events")]
+public UnityEvent OnInventoryUpdateSuccess = new UnityEvent();
+public UnityEvent OnInventoryUpdateError = new UnityEvent();
+
+void OnEnable()
+{
+    if (PlayfabInventory.Instance != null && PlayfabInventory.Instance != this)
+    {
+        GameObject.Destroy(this.gameObject);
+    }
+    else
+    {
+        PlayfabInventory.instance = this;
+
+        DontDestroyOnLoad(this.gameObject);
+
+        this.UpdateInventory();
+    }
+}
+
+private float nextUpdateInventory = 0.0f;
+private const float UpdateInventoryEvery = 15.0f;
+void Update()
+{
+    if (this.nextUpdateInventory > 0.0f)
+        this.nextUpdateInventory -= Time.deltaTime;
+    
+    if (this.nextUpdateInventory <= 0.0f)
+    {
+        this.UpdateInventory();
+        this.nextUpdateInventory = PlayfabInventory.UpdateInventoryEvery;
+    }
+}
+
+public void UpdateInventory()
+{
+    if (PlayfabAuth.IsLoggedIn == true)
+    {
+        var request = new GetUserInventoryRequest();
+        PlayFabClientAPI.GetUserInventory(request, OnGetUserInventorySuccess, OnGetUserInventoryError);
+    }
+
+    this.nextUpdateInventory = PlayfabInventory.UpdateInventoryEvery;
+}
+
+private void OnGetUserInventorySuccess(GetUserInventoryResult result)
+{
+    this.Inventory = new List<PlayfabInventoryItem>();
+    foreach (var item in result.Inventory)
+    {
+        PlayfabInventoryItem newItem = new PlayfabInventoryItem();
+        newItem.ItemId = item.ItemId;
+        newItem.DisplayName = item.DisplayName;
+        newItem.Count = item.RemainingUses.Value;
+        this.Inventory.Add(newItem);
+    }
+
+    this.VirtualCurrency = result.VirtualCurrency;
+
+    if (this.OnInventoryUpdateSuccess != null)
+        this.OnInventoryUpdateSuccess.Invoke();
+}
+
+private void OnGetUserInventoryError(PlayFabError error)
+{
+    Debug.LogError("PlayfabInventory.OnGetUserInventoryError() - Error: " + error.GenerateErrorReport());
+
+    if (this.OnInventoryUpdateError != null)
+        this.OnInventoryUpdateError.Invoke();
+}
+
+public bool Possess(string catalogItemID)
+{
+    if (!string.IsNullOrWhiteSpace(catalogItemID) && this.Inventory != null)
+    {
+        foreach (var item in this.Inventory)
         {
-            // Register to events
-            PlayfabInventory.Instance.OnInventoryUpdateSuccess.AddListener(this.OnInventoryUpdateSuccess);
-            PlayfabInventory.Instance.OnInventoryUpdateError.AddListener(this.OnInventoryUpdateError);
-
-            // Ask inventory to update itself
-            PlayfabInventory.Instance.UpdateInventory();
-        }
-
-        //// Update view to init
-        //this.UpdateView();
-    }
-
-    void OnDisable()
-    {
-        // Inventory is setup?
-        if (PlayfabInventory.Instance != null)
-        {
-            // Unregister to events
-            PlayfabInventory.Instance.OnInventoryUpdateSuccess.RemoveListener(this.OnInventoryUpdateSuccess);
-            PlayfabInventory.Instance.OnInventoryUpdateError.RemoveListener(this.OnInventoryUpdateError);
+            if (item.ItemId == catalogItemID)
+                return true;
         }
     }
-
-    private void OnInventoryUpdateSuccess()
-    {
-        this.Show();
-        this.UpdateView();
-    }
-
-    private void OnInventoryUpdateError()
-    {
-        this.Show();
-        this.UpdateView();
-    }
-
-    [Header("Inventory")]
-    public string virtualCurrencyListing = "CR";
-
-    [Header("UI")]
-    // Content root
-    public Transform contentRoot = null;
-
-    // Content UI
-    public Text usernameText = null;
-    //
-    public Text crystalsCountText = null;
-    public Image crystalsIcon = null;
-
-    public void UpdateView()
-    {
-        int crystalsCount = 0;
-
-        // Get crystals from data
-        if (PlayfabInventory.Instance != null && PlayfabInventory.Instance.VirtualCurrency != null && PlayfabInventory.Instance.VirtualCurrency.ContainsKey("CR") == true)
-        {
-            crystalsCount = PlayfabInventory.Instance.VirtualCurrency[this.virtualCurrencyListing];
-        }
-
-        // Update crystals count
-        {
-            if (this.crystalsCountText != null)
-            {
-                this.crystalsCountText.gameObject.SetActive(true);
-                this.crystalsCountText.text = crystalsCount.ToString();
-            }
-
-            if (this.crystalsIcon != null)
-                this.crystalsIcon.gameObject.SetActive(true);
-        }
-
-        // Show
-        this.Show();
-    }
-
-    // Show / Hide
-    void Show()
-    {
-        if (this.contentRoot != null)
-            this.contentRoot.gameObject.SetActive(true);
-    }
-
-    void Hide()
-    {
-        if (this.contentRoot != null)
-            this.contentRoot.gameObject.SetActive(false);
-    }
+    return false;
+}
 }
